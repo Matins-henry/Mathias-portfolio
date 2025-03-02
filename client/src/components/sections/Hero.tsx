@@ -19,34 +19,116 @@ export function Hero() {
     const renderer = new THREE.WebGLRenderer({
       canvas: canvasRef.current,
       alpha: true,
+      antialias: true,
     });
 
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     camera.position.z = 5;
 
     // Create animated background particles
     const particlesGeometry = new THREE.BufferGeometry();
     const particlesCount = 5000;
     const posArray = new Float32Array(particlesCount * 3);
+    const scaleArray = new Float32Array(particlesCount);
 
-    for (let i = 0; i < particlesCount * 3; i++) {
-      posArray[i] = (Math.random() - 0.5) * 10;
+    for (let i = 0; i < particlesCount * 3; i += 3) {
+      // Position
+      posArray[i] = (Math.random() - 0.5) * 15;
+      posArray[i + 1] = (Math.random() - 0.5) * 15;
+      posArray[i + 2] = (Math.random() - 0.5) * 5;
+      // Scale
+      scaleArray[i / 3] = Math.random();
     }
 
     particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-    const particlesMaterial = new THREE.PointsMaterial({
-      size: 0.005,
-      color: '#808080',
+    particlesGeometry.setAttribute('scale', new THREE.BufferAttribute(scaleArray, 1));
+
+    // Custom shader material for particles
+    const particlesMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color('#808080') },
+        uMouse: { value: new THREE.Vector2(0, 0) },
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform vec2 uMouse;
+        attribute float scale;
+        varying vec3 vPosition;
+
+        void main() {
+          vPosition = position;
+          vec3 pos = position;
+
+          // Mouse interaction
+          float dist = distance(pos.xy, uMouse);
+          pos.z += sin(dist * 3.0 - uTime) * 0.1;
+
+          // Time-based animation
+          pos.y += sin(uTime + pos.x) * 0.1;
+
+          vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+          gl_PointSize = scale * 2.0 * (1000.0 / -mvPosition.z);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColor;
+        varying vec3 vPosition;
+
+        void main() {
+          float strength = distance(gl_PointCoord, vec2(0.5));
+          strength = 1.0 - strength;
+          strength = pow(strength, 3.0);
+
+          vec3 finalColor = mix(uColor, vec3(1.0), vPosition.z * 0.5);
+          gl_FragColor = vec4(finalColor, strength);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
     });
 
     const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
     scene.add(particlesMesh);
 
+    // Mouse movement
+    const mouse = {
+      x: 0,
+      y: 0,
+      targetX: 0,
+      targetY: 0,
+    };
+
+    const handleMouseMove = (event: MouseEvent) => {
+      mouse.targetX = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.targetY = -(event.clientY / window.innerHeight) * 2 + 1;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+
     // Animation
+    const clock = new THREE.Clock();
+
     const animate = () => {
-      requestAnimationFrame(animate);
-      particlesMesh.rotation.y += 0.001;
+      const elapsedTime = clock.getElapsedTime();
+
+      // Update uniforms
+      (particlesMaterial.uniforms.uTime.value = elapsedTime);
+
+      // Smooth mouse movement
+      mouse.x += (mouse.targetX - mouse.x) * 0.1;
+      mouse.y += (mouse.targetY - mouse.y) * 0.1;
+      particlesMaterial.uniforms.uMouse.value.set(mouse.x * 5, mouse.y * 5);
+
+      // Rotate scene slightly based on mouse position
+      scene.rotation.x = mouse.y * 0.1;
+      scene.rotation.y = mouse.x * 0.1;
+
       renderer.render(scene, camera);
+      requestAnimationFrame(animate);
     };
     animate();
 
@@ -71,8 +153,19 @@ export function Hero() {
       ease: "power4.out",
     }, "-=0.5");
 
+    // Handle resize
+    const handleResize = () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    };
+
+    window.addEventListener('resize', handleResize);
+
     // Cleanup
     return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('resize', handleResize);
       scene.remove(particlesMesh);
       particlesGeometry.dispose();
       particlesMaterial.dispose();
