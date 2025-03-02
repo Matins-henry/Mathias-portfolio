@@ -2,6 +2,7 @@ export const SECTIONS = {
   HOME: "home",
   ABOUT: "about",
   SKILLS: "skills",
+  TIMELINE: "timeline",
   PROJECTS: "projects",
   CONTACT: "contact",
 };
@@ -15,6 +16,37 @@ export const SKILLS = [
   { name: "Tailwind", level: 85 },
   { name: "Git", level: 80 },
   { name: "REST APIs", level: 85 },
+];
+
+export const CAREER_MILESTONES = [
+  {
+    year: 2024,
+    title: "Senior Full Stack Developer",
+    company: "Tech Innovations Inc.",
+    description: "Leading development of enterprise-scale applications",
+    tech: ["React", "Node.js", "AWS"],
+  },
+  {
+    year: 2022,
+    title: "Full Stack Team Lead",
+    company: "Digital Solutions Ltd",
+    description: "Managed team of 5 developers, delivered 12 major projects",
+    tech: ["React", "TypeScript", "PostgreSQL"],
+  },
+  {
+    year: 2020,
+    title: "Full Stack Developer",
+    company: "Web Solutions",
+    description: "Developed and maintained multiple client projects",
+    tech: ["JavaScript", "React", "Node.js"],
+  },
+  {
+    year: 2018,
+    title: "Junior Developer",
+    company: "StartUp Tech",
+    description: "Built and launched 3 successful web applications",
+    tech: ["JavaScript", "HTML/CSS", "jQuery"],
+  },
 ];
 
 export const PROJECTS = [
