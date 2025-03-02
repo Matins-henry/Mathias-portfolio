@@ -60,16 +60,22 @@ export function Hero() {
     const atmosphereMaterial = new THREE.ShaderMaterial({
       vertexShader: `
         varying vec3 vertexNormal;
+        varying vec3 viewVector;
+
         void main() {
           vertexNormal = normalize(normalMatrix * normal);
+          viewVector = normalize(cameraPosition - (modelMatrix * vec4(position, 1.0)).xyz);
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
         varying vec3 vertexNormal;
+        varying vec3 viewVector;
+
         void main() {
-          float intensity = pow(0.7 - dot(vertexNormal, vec3(0.0, 0.0, 1.0)), 2.0);
-          gl_FragColor = vec4(0.3, 0.6, 1.0, intensity);
+          float rim = pow(0.7 - dot(vertexNormal, viewVector), 3.0);
+          vec3 glow = vec3(0.3, 0.6, 1.0);
+          gl_FragColor = vec4(glow, rim * 0.6);
         }
       `,
       blending: THREE.AdditiveBlending,
@@ -77,24 +83,75 @@ export function Hero() {
       transparent: true,
     });
 
-    // Create globe material with simple shader
+    // Create globe material with advanced shader
     const globeMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uLight: { value: new THREE.Vector3(1, 1, 1).normalize() },
+        uMouse: { value: new THREE.Vector2(0, 0) },
+      },
       vertexShader: `
+        uniform float uTime;
+        uniform vec2 uMouse;
         varying vec2 vertexUV;
         varying vec3 vertexNormal;
+        varying vec3 viewVector;
+        varying vec3 worldPosition;
+
         void main() {
           vertexUV = uv;
           vertexNormal = normalize(normalMatrix * normal);
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          worldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+          viewVector = normalize(cameraPosition - worldPosition);
+
+          // Add subtle vertex displacement based on mouse position
+          vec3 mouseEffect = vec3(uMouse.x, uMouse.y, 0.0);
+          float distanceToMouse = length(mouseEffect - position.xyz);
+          vec3 newPosition = position + normal * sin(distanceToMouse * 5.0 + uTime) * 0.02;
+
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
         }
       `,
       fragmentShader: `
+        uniform vec3 uLight;
+        uniform float uTime;
+        uniform vec2 uMouse;
+
         varying vec2 vertexUV;
         varying vec3 vertexNormal;
+        varying vec3 viewVector;
+        varying vec3 worldPosition;
+
         void main() {
-          float intensity = 1.05 - dot(vertexNormal, vec3(0.0, 0.0, 1.0));
-          vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 1.5);
-          gl_FragColor = vec4(atmosphere + vec3(0.1), 1.0);
+          // Dynamic base color gradient
+          vec3 baseColor = mix(
+            vec3(0.1, 0.3, 0.6),
+            vec3(0.3, 0.6, 1.0),
+            vertexUV.y + sin(uTime * 0.5) * 0.2
+          );
+
+          // Enhanced diffuse lighting
+          float diffuse = max(dot(vertexNormal, uLight), 0.0);
+
+          // Advanced Fresnel rim effect
+          float fresnel = pow(1.0 - dot(vertexNormal, viewVector), 3.0);
+          vec3 rimColor = vec3(0.5, 0.7, 1.0);
+
+          // Interactive wave pattern based on mouse position
+          float mouseDistance = length(uMouse - vertexUV * 2.0);
+          float wave = sin(mouseDistance * 10.0 - uTime) * 0.5 + 0.5;
+          wave *= sin(vertexUV.x * 20.0 + uTime * 0.5) * 0.5 + 0.5;
+
+          // Add subtle pulse effect
+          float pulse = sin(uTime) * 0.5 + 0.5;
+
+          // Combine all effects
+          vec3 finalColor = baseColor * (diffuse * 0.5 + 0.5);
+          finalColor += rimColor * fresnel * 0.4;
+          finalColor += wave * vec3(0.1, 0.2, 0.3) * 0.3;
+          finalColor *= 0.8 + pulse * 0.2;
+
+          gl_FragColor = vec4(finalColor, 1.0);
         }
       `,
     });
@@ -126,6 +183,15 @@ export function Hero() {
 
     window.addEventListener('mousemove', handleMouseMove, { passive: true });
 
+    // Add point lights for enhanced lighting
+    const pointLight1 = new THREE.PointLight(0x4169e1, 2, 10);
+    pointLight1.position.set(2, 2, 4);
+    scene.add(pointLight1);
+
+    const pointLight2 = new THREE.PointLight(0x4169e1, 1.5, 10);
+    pointLight2.position.set(-2, -2, 4);
+    scene.add(pointLight2);
+
     // Animation loop with performance optimization
     const clock = new THREE.Clock();
     let lastFrame = 0;
@@ -149,6 +215,10 @@ export function Hero() {
       if (elapsed > frameInterval) {
         const elapsedTime = clock.getElapsedTime();
 
+        // Update shader uniforms
+        globeMaterial.uniforms.uTime.value = elapsedTime;
+        globeMaterial.uniforms.uMouse.value.set(mouse.x, mouse.y);
+
         // Smooth rotation
         globe.rotation.y += 0.002;
 
@@ -159,6 +229,12 @@ export function Hero() {
         globe.rotation.x = mouse.y * 0.3;
         atmosphere.rotation.x = globe.rotation.x;
         atmosphere.rotation.y = globe.rotation.y;
+
+        // Animate point lights
+        pointLight1.position.x = Math.sin(elapsedTime * 0.5) * 3;
+        pointLight1.position.y = Math.cos(elapsedTime * 0.3) * 3;
+        pointLight2.position.x = Math.sin(elapsedTime * 0.3) * -3;
+        pointLight2.position.y = Math.cos(elapsedTime * 0.5) * -3;
 
         renderer.render(scene, camera);
         lastFrame = now - (elapsed % frameInterval);
@@ -209,6 +285,8 @@ export function Hero() {
       window.removeEventListener('resize', handleResize);
       scene.remove(globe);
       scene.remove(atmosphere);
+      scene.remove(pointLight1);
+      scene.remove(pointLight2);
       globeGeometry.dispose();
       atmosphereGeometry.dispose();
       globeMaterial.dispose();
