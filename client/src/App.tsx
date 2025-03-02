@@ -1,11 +1,12 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { CustomCursor } from "@/components/layout/CustomCursor";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { LoadingAnimation } from "@/components/LoadingAnimation";
 
 // Lazy load pages with performance monitoring
 const monitoredImport = (name: string, importFn: () => Promise<any>) => {
@@ -30,9 +31,26 @@ const PageLoader = () => (
   </div>
 );
 
-function Router() {
+// Custom hook for loading state
+function useLoadingState() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [location] = useLocation();
+
+  useEffect(() => {
+    setIsLoading(true);
+    const timer = setTimeout(() => setIsLoading(false), 800); // Minimum loading time
+    return () => clearTimeout(timer);
+  }, [location]);
+
+  return isLoading;
+}
+
+function AppRouter() {
+  const isLoading = useLoadingState();
+
   return (
     <ErrorBoundary>
+      <LoadingAnimation isLoading={isLoading} />
       <Suspense fallback={<PageLoader />}>
         <Switch>
           <Route path="/" component={Home} />
@@ -49,7 +67,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <CustomCursor />
-      <Router />
+      <AppRouter />
       <Toaster />
     </QueryClientProvider>
   );
