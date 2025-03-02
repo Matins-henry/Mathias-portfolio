@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { ArrowDown } from "lucide-react";
@@ -9,9 +9,34 @@ import * as THREE from "three";
 export function Hero() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<number>();
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    if (!canvasRef.current || !containerRef.current) return;
+    // Setup intersection observer for lazy initialization
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            observer.disconnect();
+          }
+        });
+      },
+      { threshold: 0.1 }
+    );
+
+    if (containerRef.current) {
+      observer.observe(containerRef.current);
+    }
+
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible || !canvasRef.current || !containerRef.current) return;
+
+    console.time('Hero:init');
 
     // Three.js setup
     const scene = new THREE.Scene();
@@ -20,81 +45,69 @@ export function Hero() {
       canvas: canvasRef.current,
       alpha: true,
       antialias: true,
+      powerPreference: "high-performance",
     });
 
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     camera.position.z = 5;
 
-    // Create animated background particles
-    const particlesGeometry = new THREE.BufferGeometry();
-    const particlesCount = 5000;
-    const posArray = new Float32Array(particlesCount * 3);
-    const scaleArray = new Float32Array(particlesCount);
+    // Create globe geometry
+    const globeGeometry = new THREE.SphereGeometry(2, 64, 64);
 
-    for (let i = 0; i < particlesCount * 3; i += 3) {
-      // Position
-      posArray[i] = (Math.random() - 0.5) * 15;
-      posArray[i + 1] = (Math.random() - 0.5) * 15;
-      posArray[i + 2] = (Math.random() - 0.5) * 5;
-      // Scale
-      scaleArray[i / 3] = Math.random();
-    }
-
-    particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
-    particlesGeometry.setAttribute('scale', new THREE.BufferAttribute(scaleArray, 1));
-
-    // Custom shader material for particles
-    const particlesMaterial = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uColor: { value: new THREE.Color('#808080') },
-        uMouse: { value: new THREE.Vector2(0, 0) },
-      },
+    // Create atmosphere effect
+    const atmosphereGeometry = new THREE.SphereGeometry(2.1, 64, 64);
+    const atmosphereMaterial = new THREE.ShaderMaterial({
       vertexShader: `
-        uniform float uTime;
-        uniform vec2 uMouse;
-        attribute float scale;
-        varying vec3 vPosition;
-
+        varying vec3 vertexNormal;
         void main() {
-          vPosition = position;
-          vec3 pos = position;
-
-          // Mouse interaction
-          float dist = distance(pos.xy, uMouse);
-          pos.z += sin(dist * 3.0 - uTime) * 0.1;
-
-          // Time-based animation
-          pos.y += sin(uTime + pos.x) * 0.1;
-
-          vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-          gl_PointSize = scale * 2.0 * (1000.0 / -mvPosition.z);
-          gl_Position = projectionMatrix * mvPosition;
+          vertexNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
       fragmentShader: `
-        uniform vec3 uColor;
-        varying vec3 vPosition;
-
+        varying vec3 vertexNormal;
         void main() {
-          float strength = distance(gl_PointCoord, vec2(0.5));
-          strength = 1.0 - strength;
-          strength = pow(strength, 3.0);
-
-          vec3 finalColor = mix(uColor, vec3(1.0), vPosition.z * 0.5);
-          gl_FragColor = vec4(finalColor, strength);
+          float intensity = pow(0.7 - dot(vertexNormal, vec3(0.0, 0.0, 1.0)), 2.0);
+          gl_FragColor = vec4(0.3, 0.6, 1.0, intensity);
         }
       `,
-      transparent: true,
-      depthWrite: false,
       blending: THREE.AdditiveBlending,
+      side: THREE.BackSide,
+      transparent: true,
     });
 
-    const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
-    scene.add(particlesMesh);
+    // Create globe material with simple shader
+    const globeMaterial = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec2 vertexUV;
+        varying vec3 vertexNormal;
+        void main() {
+          vertexUV = uv;
+          vertexNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec2 vertexUV;
+        varying vec3 vertexNormal;
+        void main() {
+          float intensity = 1.05 - dot(vertexNormal, vec3(0.0, 0.0, 1.0));
+          vec3 atmosphere = vec3(0.3, 0.6, 1.0) * pow(intensity, 1.5);
+          gl_FragColor = vec4(atmosphere + vec3(0.1), 1.0);
+        }
+      `,
+    });
 
-    // Mouse movement
+    const globe = new THREE.Mesh(globeGeometry, globeMaterial);
+    const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+
+    scene.add(globe);
+    scene.add(atmosphere);
+
+    console.timeEnd('Hero:init');
+
+    // Mouse interaction setup
     const mouse = {
       x: 0,
       y: 0,
@@ -102,76 +115,107 @@ export function Hero() {
       targetY: 0,
     };
 
+    let mouseTimeout: NodeJS.Timeout;
     const handleMouseMove = (event: MouseEvent) => {
-      mouse.targetX = (event.clientX / window.innerWidth) * 2 - 1;
-      mouse.targetY = -(event.clientY / window.innerHeight) * 2 + 1;
+      if (mouseTimeout) clearTimeout(mouseTimeout);
+      mouseTimeout = setTimeout(() => {
+        mouse.targetX = (event.clientX / window.innerWidth) * 2 - 1;
+        mouse.targetY = -(event.clientY / window.innerHeight) * 2 + 1;
+      }, 50);
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mousemove', handleMouseMove, { passive: true });
 
-    // Animation
+    // Animation loop with performance optimization
     const clock = new THREE.Clock();
+    let lastFrame = 0;
+    const fps = 30;
+    const frameInterval = 1000 / fps;
+    let frameCount = 0;
+    let lastFPSUpdate = performance.now();
 
     const animate = () => {
-      const elapsedTime = clock.getElapsedTime();
+      const now = performance.now();
+      const elapsed = now - lastFrame;
 
-      // Update uniforms
-      (particlesMaterial.uniforms.uTime.value = elapsedTime);
+      // FPS monitoring
+      frameCount++;
+      if (now - lastFPSUpdate >= 1000) {
+        console.log(`Current FPS: ${frameCount}`);
+        frameCount = 0;
+        lastFPSUpdate = now;
+      }
 
-      // Smooth mouse movement
-      mouse.x += (mouse.targetX - mouse.x) * 0.1;
-      mouse.y += (mouse.targetY - mouse.y) * 0.1;
-      particlesMaterial.uniforms.uMouse.value.set(mouse.x * 5, mouse.y * 5);
+      if (elapsed > frameInterval) {
+        const elapsedTime = clock.getElapsedTime();
 
-      // Rotate scene slightly based on mouse position
-      scene.rotation.x = mouse.y * 0.1;
-      scene.rotation.y = mouse.x * 0.1;
+        // Smooth rotation
+        globe.rotation.y += 0.002;
 
-      renderer.render(scene, camera);
-      requestAnimationFrame(animate);
+        // Interactive tilt based on mouse position
+        mouse.x += (mouse.targetX - mouse.x) * 0.05;
+        mouse.y += (mouse.targetY - mouse.y) * 0.05;
+
+        globe.rotation.x = mouse.y * 0.3;
+        atmosphere.rotation.x = globe.rotation.x;
+        atmosphere.rotation.y = globe.rotation.y;
+
+        renderer.render(scene, camera);
+        lastFrame = now - (elapsed % frameInterval);
+      }
+
+      frameRef.current = requestAnimationFrame(animate);
     };
-    animate();
 
-    // GSAP animations
+    frameRef.current = requestAnimationFrame(animate);
+
+    // GSAP animations for content
+    console.time('Hero:gsap');
     const tl = gsap.timeline();
-    tl.from(".hero-title", {
-      y: 100,
-      opacity: 0,
-      duration: 1,
-      ease: "power4.out",
-    })
-    .from(".hero-subtitle", {
+    tl.from(".hero-title, .hero-subtitle, .hero-buttons", {
       y: 50,
       opacity: 0,
       duration: 1,
+      stagger: 0.2,
       ease: "power4.out",
-    }, "-=0.5")
-    .from(".hero-buttons", {
-      y: 50,
-      opacity: 0,
-      duration: 1,
-      ease: "power4.out",
-    }, "-=0.5");
+    });
+    console.timeEnd('Hero:gsap');
 
-    // Handle resize
+    // Optimized resize handler
+    let resizeTimeout: NodeJS.Timeout;
     const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      if (resizeTimeout) clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        console.time('Hero:resize');
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+        console.timeEnd('Hero:resize');
+      }, 250);
     };
 
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleResize, { passive: true });
 
     // Cleanup
     return () => {
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+      }
+      if (mouseTimeout) clearTimeout(mouseTimeout);
+      if (resizeTimeout) clearTimeout(resizeTimeout);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('resize', handleResize);
-      scene.remove(particlesMesh);
-      particlesGeometry.dispose();
-      particlesMaterial.dispose();
+      scene.remove(globe);
+      scene.remove(atmosphere);
+      globeGeometry.dispose();
+      atmosphereGeometry.dispose();
+      globeMaterial.dispose();
+      atmosphereMaterial.dispose();
       renderer.dispose();
     };
-  }, []);
+  }, [isVisible]);
 
   return (
     <section
