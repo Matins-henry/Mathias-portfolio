@@ -1,7 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist/public",
+  "framework": "vite",
   "builds": [
     {
       "src": "server/index.ts",
@@ -14,8 +13,11 @@
       "dest": "/server/index.ts"
     },
     {
+      "handle": "filesystem"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/$1"
+      "dest": "/server/index.ts"
     }
   ]
 }
